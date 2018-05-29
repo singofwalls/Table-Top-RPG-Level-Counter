@@ -5,10 +5,10 @@
 # TODO: Monster speed affects player run away roll needed
 # TODO: Hold down on +/- for speed inc/dec
 # TODO: Auto launch on screen keyboard exe if in touchscreen mode
-# TODO: Show random number temporarily (with coloring for escape) when monster run away tapped
 
 
 import random
+import time
 import ctypes
 import bisect
 import traceback
@@ -45,6 +45,7 @@ BACKGROUND_COLOR = (60, 63, 65)
 DEFAULT_PLAYER_COLOR = (30, 35, 42)
 POSITIVE_BUTTON_COLOR = (165, 225, 56)
 NEGATIVE_BUTTON_COLOR = (248, 38, 114)
+CLICK_COLOR = (56, 60, 66)
 DEFAULT_BORDER_COLOR = (52, 54, 56)
 COMBAT_STRENGTH_COLOR = (214, 150, 33)
 STAT_COLOR = (255, 255, 255)
@@ -67,6 +68,8 @@ WINDOW_CAPTION = "Munchkin Level Counter"
 PLAYER_BUTTON_NAMES = ["Level", "Gear", "1Shot", "Misc", "Speed"]
 MONSTER_BUTTON_NAMES = ["Level", "Gear", "1Shot", "Misc", "Speed"]
 COMBAT_COMPONENTS = PLAYER_BUTTON_NAMES[:-1]
+
+CLICK_TIME = .1
 
 MIN_SCROLLBAR_SIZE = 30
 SCROLLBAR_WIDTH = BUTTON_WIDTH
@@ -381,8 +384,9 @@ class Player:
     def check_buttons(self):
         global last_click, dirty
 
-        if not isinstance(last_click, type(None)):
-            for _button in self.buttons:
+        for _button in self.buttons:
+            _button.check_click_time()
+            if not isinstance(last_click, type(None)):
                 if _button.check(last_click):
                     clear_naming_players()
                     if "Up" in _button.name or "Down" in _button.name:
@@ -661,7 +665,21 @@ class Button:
         self.text_size = None
         self.rect = None
 
+        self.click_time = None
+
         self.pos = None
+
+    def check_click_time(self):
+        global dirty
+        if not isinstance(self.click_time, type(None)):
+            if self.click_time + CLICK_TIME > time.time():
+                # Show clicked
+                self.color = CLICK_COLOR
+                dirty = True
+            else:
+                self.color = DEFAULT_PLAYER_COLOR
+                self.click_time = None
+                dirty = True
 
     def render(self, rect=None, player=None):
         if isinstance(rect, type(None)):
@@ -671,6 +689,8 @@ class Button:
                 return None  # If player has not yet been rendered, skip
         else:
             self.rect = rect
+
+        self.check_click_time()
 
         if isinstance(self.text_size, type(None)):
             self.pos = None
@@ -717,10 +737,10 @@ class Button:
             return None
         if self.name in combat_buttons and not check_in_combat():
             return False  # Do not click combat buttons when not in combat
-        if self.rect[0] <= pos[0] <= self.rect[0] + self.rect[2]:
-            if self.rect[1] <= pos[1] <= self.rect[1] + self.rect[3]:
-                dirty = True
-                return True
+        if within_rect(self.rect, pos):
+            dirty = True
+            self.click_time = time.time()
+            return True
         return False
 
 
@@ -844,8 +864,10 @@ def check_naming():
 
 def check_buttons():
     global last_click
-    if not isinstance(last_click, type(None)):
-        for button in buttons:
+
+    for button in buttons:
+        button.check_click_time()
+        if not isinstance(last_click, type(None)):
             if button.check(last_click):
                 last_click = None
                 if button.name == "Player Add":
@@ -860,10 +882,10 @@ def check_buttons():
                 else:
                     raise Exception("Button '" + button.name
                                     + "' does not have a function configured.")
-        for player in players:
-            player.check_buttons()
-        for player in combat_players:
-            player.check_buttons()
+    for player in players:
+        player.check_buttons()
+    for player in combat_players:
+        player.check_buttons()
 
 
 def render_combat_bar():
