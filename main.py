@@ -62,7 +62,7 @@ min_window_width = PLAYER_WIDTH + MARGIN * 2
 WINDOW_CAPTION = "Munchkin Level Counter"
 
 PLAYER_BUTTON_NAMES = ["Level", "Gear", "1Shot", "Misc", "Speed"]
-MONSTER_BUTTON_NAMES = ["Level", "Gear", "1Shot", "Misc"]
+MONSTER_BUTTON_NAMES = ["Level", "Gear", "1Shot", "Misc", "Speed"]
 COMBAT_COMPONENTS = PLAYER_BUTTON_NAMES[:-1]
 
 MIN_SCROLLBAR_SIZE = 30
@@ -249,6 +249,7 @@ class Player:
 
         # Display each level name and buttons
         stat_num = 0
+        level_rect = self.rect
         for button in self.buttons:
             pos = button.render(player=self)
             if not isinstance(pos, type(None)):
@@ -266,7 +267,8 @@ class Player:
                         stat_rect[1], BUTTON_WIDTH, BUTTON_WIDTH)
                     self.level_rects[stat] = level_rect
                     if stat == "Speed":
-                        level_rect = level_rect[:3] + (level_rect[3] / 1.5,)
+                        level_rect = level_rect[:2] + (
+                            level_rect[2] / 1.5, level_rect[3])
                     if isinstance(self.stat_sizes[stat], type(None)):
                         self.stat_sizes[stat] = get_text_size_to_fit(stat,
                                                                      stat_rect)
@@ -286,7 +288,7 @@ class Player:
                                  self.level_sizes[stat])
 
                     if stat == "Speed":
-                        x = level_rect[0] + level_rect[2] * .75
+                        x = level_rect[0] + level_rect[2] + 3
                         y = level_rect[1]
                         w = BUTTON_WIDTH * .5
                         h = BUTTON_WIDTH * .5
@@ -296,6 +298,43 @@ class Player:
                                      get_text_size_to_fit(roll, speed_rect))
 
                     stat_num += 1
+
+        # Display needed run away rolls for each player against own speed
+        if self.monster:
+            player_speeds = {}
+            for _player in combat_players:
+                if not _player.monster:
+                    name = _player.name[:min(3, len(_player.name))]
+                    name_num = 2
+                    while name in player_speeds:
+                        name = name[:2] + str(name_num)
+                        name_num += 1
+                    player_speeds[name] = _player.levels["Speed"]
+
+            start_x = self.rect[0]
+            y = level_rect[1] + level_rect[3]
+            num_speeds = len(player_speeds)
+            speed_width = self.rect[2] / (num_speeds + 1)
+            speed_margin = speed_width / num_speeds
+            height = player_quarter / 5
+            for i, _player in enumerate(player_speeds):
+                speed = player_speeds[_player] + self.levels["Speed"]
+                needed_roll = 5 - speed
+                size = get_text_size_to_fit(_player,
+                                            [0, 0, speed_width, height])
+                x = (start_x + (i * (
+                        speed_width + speed_margin)) + speed_margin) - speed_margin / 2
+                text_width = get_text_dimensions(_player, size)[0]
+                tx = x + (speed_width / 2) - (text_width / 2)
+                display_text(_player, (tx, y), DEFAULT_TEXT_COLOR, size)
+
+                text = str(needed_roll)
+                size = get_text_size_to_fit(text, (
+                    0, 0, speed_width,
+                    self.rect[1] + self.rect[3] - y - height - 3))
+                text_width = get_text_dimensions(text, size)[0]
+                nx = x + (speed_width / 2) - (text_width / 2)
+                display_text(text, (nx, y + height), RUN_COLOR, size)
 
     def mark_dirty(self):
         self.name_size = None
@@ -427,8 +466,8 @@ class Player:
                 opt_margin = self.rect[2] - (
                         OPTION_BUTTON_WIDTH * len(option_buttons))
                 opt_margin /= len(option_buttons)
-                x = self.rect[0] + ((
-                                            opt_margin + OPTION_BUTTON_WIDTH) * opt_button_num) + opt_margin / 2
+                x = self.rect[0] + ((opt_margin + OPTION_BUTTON_WIDTH)
+                                    * opt_button_num) + opt_margin / 2
                 opt_button_num += 1
                 w, h = OPTION_BUTTON_WIDTH, OPTION_BUTTON_WIDTH
             else:
