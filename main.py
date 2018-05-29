@@ -1,20 +1,17 @@
 # TODO: Die Button, Notes button
 # TODO: Highlight epic/winners
 # TODO: Sounds
-# TODO: Save/Load
-# TODO: Select stats to ignore in combat (fight only with level, etc)
-# TODO: Increase Add player button size
 
 # TODO: Monster speed affects player run away roll needed
-# TODO: reset relevant stats after combat
-# TODO: Reset stat when number is tapped
 # TODO: Hold down on +/- for speed inc/dec
-# TODO: End combat button
 
 import random
 import ctypes
 import bisect
+import traceback
 from ctypes import windll
+
+from files import check_path, get_game_root
 
 import pygame
 
@@ -52,7 +49,7 @@ LEVEL_COLOR = (102, 216, 238)
 RUN_COLOR = (229, 218, 116)
 BORDER_WIDTH = 3
 DEFAULT_TEXT_COLOR = (255, 255, 255)
-DEFAULT_FONT = "fredokaone, couriernew"
+DEFAULT_FONT = "fredokaone, segoeuiblack, couriernew"
 
 PLAYER_WIDTH = 250
 BUTTON_WIDTH = 50
@@ -125,9 +122,19 @@ def get_text_size_to_fit(text, rect):
 
 # Player Initialization
 
+def create_player_from_dict(player_dict):
+    _player = Player(player_dict["name"], player_dict["monster"],
+                     player_dict["in combat"])
+    _player.sex_num = player_dict["sex num"]
+    _player.warrior = player_dict["warrior"]
+    _player.levels = player_dict["levels"]
+    _player.ignored_levels = player_dict["ignored levels"]
+    return _player
+
+
 class Player:
 
-    def __init__(self, name, monster=False):
+    def __init__(self, name, monster=False, in_combat=False):
         self.name = name
         self.monster = monster
         self.color = DEFAULT_PLAYER_COLOR
@@ -137,11 +144,11 @@ class Player:
         self.sex_num = 0
 
         combat_dir = ">"
-        if self.monster:
+        if self.monster or in_combat:
             combat_dir = "<"
 
         # Add player buttons
-        self.buttons = [Button("Remove", "X", NEGATIVE_BUTTON_COLOR),]
+        self.buttons = [Button("Remove", "X", NEGATIVE_BUTTON_COLOR), ]
         if not self.monster:
             self.buttons += [Button("Options Warrior Toggle", "W",
                                     NEGATIVE_BUTTON_COLOR),
@@ -166,6 +173,7 @@ class Player:
         self.naming = False
         self.name_pos = None
 
+        self.ignored_levels = []
         self.levels = {}
         self.level_sizes = {}  # Stat value
         self.stat_sizes = {}  # Stat name
@@ -178,10 +186,23 @@ class Player:
         self.combat_strength_pos = None
         self.combat_strength_size = None
 
+        self.stat_rects = {}
+        self.level_rects = {}
+
+    def create_player_dict(self):
+        player_dict = {"name": self.name, "monster": self.monster,
+                       "in combat": self in combat_players,
+                       "sex num": self.sex_num, "warrior": self.warrior,
+                       "levels": self.levels,
+                       "ignored levels": self.ignored_levels}
+        return player_dict
+
     def determine_strength(self):
-        self.combat_strength = sum(
-            self.levels[stat] if stat in COMBAT_COMPONENTS else 0 for
-            stat in self.levels)  # Only sum components to combat strength
+        # Only sum components to combat strength if not ignored
+        self.combat_strength = \
+            sum(self.levels[stat] if stat in COMBAT_COMPONENTS and stat
+                                     not in self.ignored_levels else 0 for stat
+                in self.levels)
         return self.combat_strength
 
     def render(self, player_rect):
@@ -239,9 +260,11 @@ class Player:
                     level = str(self.levels[stat])
                     stat_rect = (
                         x, y, PLAYER_WIDTH - BUTTON_WIDTH * 3, BUTTON_WIDTH)
+                    self.stat_rects[stat] = stat_rect
                     level_rect = (
                         stat_rect[0] + stat_rect[2] + BUTTON_WIDTH / 2,
                         stat_rect[1], BUTTON_WIDTH, BUTTON_WIDTH)
+                    self.level_rects[stat] = level_rect
                     if stat == "Speed":
                         level_rect = level_rect[:3] + (level_rect[3] / 1.5,)
                     if isinstance(self.stat_sizes[stat], type(None)):
@@ -249,8 +272,14 @@ class Player:
                                                                      stat_rect)
                         self.level_sizes[stat] = get_text_size_to_fit(
                             level, level_rect)
-                    display_text(stat, stat_rect[:2], STAT_COLOR,
-                                 self.stat_sizes[stat])
+                    size = self.stat_sizes[stat]
+                    display_text(stat, stat_rect[:2], STAT_COLOR, size)
+                    if stat in self.ignored_levels:
+                        lx = stat_rect[0]
+                        ly = stat_rect[1] + stat_rect[3] // 2
+                        lw = stat_rect[2]
+                        pygame.draw.line(display, NEGATIVE_BUTTON_COLOR,
+                                         (lx, ly), (lx + lw, ly), BORDER_WIDTH)
                     # Render level
 
                     display_text(level, level_rect[:2], LEVEL_COLOR,
@@ -296,11 +325,12 @@ class Player:
         return option_buttons
 
     def check_buttons(self):
-        global last_click
+        global last_click, dirty
 
         if not isinstance(last_click, type(None)):
             for _button in self.buttons:
                 if _button.check(last_click):
+                    clear_naming_players()
                     if "Up" in _button.name or "Down" in _button.name:
                         stat_name = _button.name[:_button.name.index(" ")]
                         self.stat_sizes[stat_name] = None
@@ -344,17 +374,45 @@ class Player:
                                             + "' does not have a function "
                                               "configured.")
                     break
-        # Recheck in case a button was pressed
+
+        # Check if name clicked
         if not isinstance(last_click, type(None)):
             self.naming = False
-            if self.name_rect[0] <= last_click[0] <= self.name_rect[0] + \
-                    self.name_rect[2]:
-                if self.name_rect[1] <= last_click[1] <= self.name_rect[1] + \
-                        self.name_rect[3]:
-                    last_click = None
-                    clear_naming_players()
-                    self.naming = True
-                    reset_text_input()
+            if within_rect(self.name_rect, last_click):
+                last_click = None
+                clear_naming_players()
+                self.naming = True
+                reset_text_input()
+
+        # Check if skill clicked and reset points
+        if not isinstance(last_click, type(None)):
+            for stat in self.level_rects:
+                level_rect = self.level_rects[stat]
+                if not isinstance(level_rect, type(None)):
+                    if within_rect(level_rect, last_click):
+                        last_click = None
+                        clear_naming_players()
+                        self.levels[stat] = 0
+                        self.stat_sizes[stat] = None
+                        self.combat_strength = None
+                        dirty = True
+                        break
+
+        # Check if skill name clicked and toggle ignore
+        if not isinstance(last_click, type(None)):
+            for stat in self.stat_rects:
+                stat_rect = self.stat_rects[stat]
+                if not isinstance(stat_rect, type(None)):
+                    if within_rect(stat_rect, last_click):
+                        last_click = None
+                        clear_naming_players()
+                        if stat in self.ignored_levels:
+                            self.ignored_levels.remove(stat)
+                        else:
+                            self.ignored_levels.append(stat)
+                        self.combat_strength = None
+                        dirty = True
+                        break
 
     def reset_buttons(self):
         opt_button_num = 0
@@ -398,6 +456,13 @@ class Player:
             _button.render(button_rect, self)
 
 
+def within_rect(rect, pos):
+    if rect[0] <= pos[0] <= rect[0] + rect[2]:
+        if rect[1] <= pos[1] <= rect[1] + rect[3]:
+            return True
+    return False
+
+
 def clean_combat():
     global combat_players
     for player in combat_players:
@@ -405,6 +470,28 @@ def clean_combat():
             break
     else:
         combat_players = []
+
+
+def clear_combat():
+    while len(combat_players) > 0:
+        player = combat_players[0]
+        if not player.monster:
+
+            # Change combat button
+            for button in player.buttons:
+                if button.name == "Options Combat Add":
+                    button.change_text(">")
+                    break
+
+            player.levels["1Shot"] = 0
+            player.ignored_levels = []
+
+            # Swap player list
+            players.append(player)
+            player.mark_dirty()
+        combat_players.remove(player)
+    clean_combat()
+    resize_display(reset_bars=True)
 
 
 def clear_naming_players():
@@ -529,7 +616,8 @@ class Button:
             y = half_height - text_dims[1] / 2
             self.pos = [x, y]
 
-        if not (self.name == "Combat Add" and not check_in_combat()):
+        # Do not render combat button when not in combat
+        if not (self.name in combat_buttons and not check_in_combat()):
             if "Warrior" in self.name:
                 if player.warrior:
                     self.text_color = POSITIVE_BUTTON_COLOR
@@ -550,8 +638,8 @@ class Button:
         global dirty
         if isinstance(last_click, type(None)):
             return None
-        if self.name == "Combat Add" and not check_in_combat():
-            return False
+        if self.name in combat_buttons and not check_in_combat():
+            return False  # Do not click combat buttons when not in combat
         if self.rect[0] <= pos[0] <= self.rect[0] + self.rect[2]:
             if self.rect[1] <= pos[1] <= self.rect[1] + self.rect[3]:
                 dirty = True
@@ -581,6 +669,10 @@ def reset_buttons():
         elif _button.name == "Combat Add":
             button_rect = get_player_rect(len(combat_players),
                                           combat_players, True)
+        elif _button.name == "Combat End":
+            button_rect = (
+                display.get_width() - (BUTTON_WIDTH + MARGIN // 2) - MARGIN,
+                (MARGIN - BUTTON_WIDTH) // 2, BUTTON_WIDTH, BUTTON_WIDTH)
         if isinstance(button_rect, type(None)):
             raise Exception("Button '" + _button.name + "' does not have a "
                                                         "position configured.")
@@ -686,6 +778,8 @@ def check_buttons():
                     combat_players.append(
                         Player(random.choice(monster_names), True))
                     resize_display()
+                elif button.name == "Combat End":
+                    clear_combat()
                 else:
                     raise Exception("Button '" + button.name
                                     + "' does not have a function configured.")
@@ -695,28 +789,7 @@ def check_buttons():
             player.check_buttons()
 
 
-def render_objects():
-    global last_click
-
-    (_player_height, _player_start), (
-        _combat_height, combat_start) = render_players()
-
-    # Convert player rect to button rect
-    player_button_height = None
-    combat_button_height = None
-    for button in buttons:
-        pos = button.render()
-        if button.name == "Player Add":
-            player_button_height = pos[1] + BUTTON_WIDTH
-        elif button.name == "Combat Add":
-            combat_button_height = pos[1] + BUTTON_WIDTH
-
-    player_bar_height = max(_player_height,
-                            player_button_height) - _player_start + MARGIN * 2
-    combat_bar_height = max(_combat_height,
-                            combat_button_height) - combat_start + MARGIN * 3
-
-    # Display combat options
+def render_combat_bar():
     if check_in_combat():
         x = combat_window_rect[0]
         w = display.get_width() - x
@@ -779,6 +852,38 @@ def render_objects():
 
         status_size = get_text_size_to_fit(status_text, (x, 0, w, h))
         display_text(status_text, status_pos, status_color, status_size)
+        for button in buttons:
+            if button.name == "Combat End":
+                button.render()
+                break
+
+
+def render_objects():
+    global last_click
+
+    (_player_height, _player_start), (
+        _combat_height, combat_start) = render_players()
+
+    # Convert player rect to button rect
+    player_button_height = None
+    combat_button_height = None
+    for button in buttons:
+        if button.name == "Combat End":
+            continue  # Rendered with combat bar
+        pos = button.render()
+        if button.name == "Player Add":
+            player_button_height = pos[1] + BUTTON_WIDTH
+        elif button.name == "Combat Add":
+            combat_button_height = pos[1] + BUTTON_WIDTH
+
+    player_bar_height = max(_player_height,
+                            player_button_height) - _player_start + MARGIN * 2
+    combat_bar_height = max(_combat_height,
+                            combat_button_height) - combat_start + MARGIN * 3
+
+    render_combat_bar()
+
+    # Display combat options
     return player_bar_height, combat_bar_height
 
 
@@ -878,18 +983,123 @@ class ScrollBar:
         self.total_height = 1
 
 
+def new_game():
+    global players, combat_players
+    players = [Player(random.choice(player_names))]
+    combat_players = []
+
+
+def main_loop():
+    global dirty, running, fullscreen, old_resolution, text_input, last_click, \
+        player_window_rect, combat_window_rect, display
+    while running:
+
+        for event in pygame.event.get():
+            if event.type == pygame.VIDEORESIZE:
+                size = event.dict["size"]
+                resize_display(size)
+            elif event.type == pygame.QUIT:
+                running = False
+                break
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+                    break
+                elif event.key == pygame.K_F11:
+                    fullscreen = not fullscreen
+                    if not fullscreen:
+                        res = old_resolution[:]
+                        old_resolution = None
+                    else:
+                        res = None
+                    resize_display(res, True)
+                elif event.key == pygame.K_BACKSPACE:
+                    if len(text_input) > 0:
+                        text_input = text_input[:-1]
+                else:
+                    text_input += event.dict["unicode"]
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                last_click = event.dict["pos"]
+            else:
+                player_bar.handle_event(event)
+                combat_bar.handle_event(event)
+
+        if not running:
+            break
+
+        player_bar.check_click()
+        combat_bar.check_click()
+        check_buttons()
+        check_naming()
+
+        if dirty:
+            display.fill(BACKGROUND_COLOR)
+            player_window_height, combat_height = render_objects()
+            player_bar.render(player_window_height, player_window_rect)
+            if check_in_combat():
+                combat_bar.render(combat_height, combat_window_rect)
+
+            window_width = player_window_rect[2]
+            pygame.draw.line(display, DEFAULT_BORDER_COLOR, (window_width, 0),
+                             (window_width, display.get_height()), BORDER_WIDTH)
+
+            pygame.display.flip()
+            dirty = False
+            save_game()
+
+
+def save_game():
+    last_game = [[], []]
+    for player in players:
+        last_game[0].append(player.create_player_dict())
+    for player in combat_players:
+        last_game[1].append(player.create_player_dict())
+
+    last_game_file = open(check_path(get_game_root() + "last_game.mlcs"), "w")
+    last_game_file.write(last_game.__repr__())
+    last_game_file.close()
+
+
+def quit_game():
+    pygame.quit()
+    save_game()
+
+
 # Display Initialization
 dirty = True
 
 player_window_rect = None
 combat_window_rect = None
-player_names = ["Reece", "Graham", "Ryan", "Nick", "Tanner", "Josh", "Nolan",
+player_names = ["Reece", "Graham", "Ryan", "Nick", "Tanner", "Josh",
+                "Nolan",
                 "Erin"]
 monster_names = ["Monster"]
-players = [Player(random.choice(player_names))]
-combat_players = []
 
-buttons = [Button("Player Add", "+"), Button("Combat Add", "+")]
+# Load game
+file_path = get_game_root() + "last_game.mlcs"
+file = check_path(file_path)
+last_game_file = open(file, "r")
+last_game = last_game_file.read()
+last_game_file.close()
+
+players = []
+combat_players = []
+if len(last_game) > 0:
+    try:
+        last_game = eval(last_game)
+        for player in last_game[0]:
+            players.append(create_player_from_dict(player))
+        for player in last_game[1]:
+            combat_players.append(create_player_from_dict(player))
+    except:
+        new_game()
+else:
+    new_game()
+
+combat_buttons = ["Combat Add", "Combat End"]
+buttons = [Button("Player Add", "+"), Button("Combat Add", "+"),
+           Button("Combat End", "End")]
 
 display = None
 player_bar = ScrollBar("player")
@@ -897,59 +1107,9 @@ combat_bar = ScrollBar("combat")
 resize_display(DEFAULT_RESOLUTION)
 
 running = True
-while running:
-
-    for event in pygame.event.get():
-        if event.type == pygame.VIDEORESIZE:
-            size = event.dict["size"]
-            resize_display(size)
-        elif event.type == pygame.QUIT:
-            running = False
-            break
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                running = False
-                break
-            elif event.key == pygame.K_F11:
-                fullscreen = not fullscreen
-                if not fullscreen:
-                    res = old_resolution[:]
-                    old_resolution = None
-                else:
-                    res = None
-                resize_display(res, True)
-            elif event.key == pygame.K_BACKSPACE:
-                if len(text_input) > 0:
-                    text_input = text_input[:-1]
-            else:
-                text_input += event.dict["unicode"]
-
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            last_click = event.dict["pos"]
-        else:
-            player_bar.handle_event(event)
-            combat_bar.handle_event(event)
-
-    if not running:
-        break
-
-    player_bar.check_click()
-    combat_bar.check_click()
-    check_buttons()
-    check_naming()
-
-    if dirty:
-        display.fill(BACKGROUND_COLOR)
-        player_window_height, combat_height = render_objects()
-        player_bar.render(player_window_height, player_window_rect)
-        if check_in_combat():
-            combat_bar.render(combat_height, combat_window_rect)
-
-        window_width = player_window_rect[2]
-        pygame.draw.line(display, DEFAULT_BORDER_COLOR, (window_width, 0),
-                         (window_width, display.get_height()), BORDER_WIDTH)
-
-        pygame.display.flip()
-        dirty = False
-
-pygame.quit()
+try:
+    main_loop()
+except Exception as e:
+    traceback.print_exc()
+finally:
+    quit_game()
