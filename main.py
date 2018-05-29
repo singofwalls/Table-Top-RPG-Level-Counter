@@ -4,6 +4,9 @@
 
 # TODO: Monster speed affects player run away roll needed
 # TODO: Hold down on +/- for speed inc/dec
+# TODO: Auto launch on screen keyboard exe if in touchscreen mode
+# TODO: Show random number temporarily (with coloring for escape) when monster run away tapped
+
 
 import random
 import ctypes
@@ -150,15 +153,15 @@ class Player:
         # Add player buttons
         self.buttons = [Button("Remove", "X", NEGATIVE_BUTTON_COLOR), ]
         if not self.monster:
-            self.buttons += [Button("Options Warrior Toggle", "W",
+            self.buttons += [Button("Options Dice", "D", RUN_COLOR),
+                             Button("Options Warrior Toggle", "W",
                                     NEGATIVE_BUTTON_COLOR),
                              Button("Options Sex Toggle", "M", RUN_COLOR),
                              Button("Options Combat Add", combat_dir,
-                                    POSITIVE_BUTTON_COLOR)]
+                                    RUN_COLOR)]
 
-        # Button("Options Die", "R", RUN_COLOR),
         # Button("Options Notes", "N", RUN_COLOR),
-        # TODO: Add above options and functionality
+        # TODO: Add above option and functionality
 
         button_names = PLAYER_BUTTON_NAMES
         if self.monster:
@@ -328,13 +331,25 @@ class Player:
                 tx = x + (speed_width / 2) - (text_width / 2)
                 display_text(_player, (tx, y), DEFAULT_TEXT_COLOR, size)
 
+                color = RUN_COLOR
+                for _button in combat_players[i].buttons:
+                    if "Dice" in _button.name:
+                        if _button.text != "D":
+                            rolled_num = int(_button.text)
+                            if rolled_num >= needed_roll:
+                                color = POSITIVE_BUTTON_COLOR
+                            else:
+                                color = NEGATIVE_BUTTON_COLOR
+                        break
+
                 text = str(needed_roll)
-                size = get_text_size_to_fit(text, (
-                    0, 0, speed_width,
-                    self.rect[1] + self.rect[3] - y - height - 3))
+                w = speed_width
+                h = self.rect[1] + self.rect[3] - y - height - 3
+                size = get_text_size_to_fit(text, (0, 0, w, h))
                 text_width = get_text_dimensions(text, size)[0]
                 nx = x + (speed_width / 2) - (text_width / 2)
-                display_text(text, (nx, y + height), RUN_COLOR, size)
+                ny = y + height
+                display_text(text, (nx, ny), color, size)
 
     def mark_dirty(self):
         self.name_size = None
@@ -401,6 +416,12 @@ class Player:
                     elif "Sex" in _button.name:
                         self.sex_num = (self.sex_num + 1) % len(SEXES)
                         _button.change_text(SEXES[self.sex_num])
+                    elif "Dice" in _button.name:
+                        roll = random.randint(1, 6)
+                        color = NEGATIVE_BUTTON_COLOR
+                        if roll >= self.calc_run_roll():
+                            color = POSITIVE_BUTTON_COLOR
+                        _button.change_text(str(roll), color)
                     else:
                         modifier = 1
                         if "Down" in _button.name:
@@ -408,6 +429,20 @@ class Player:
                         stat = _button.name[:_button.name.index(" ")]
                         if stat in self.levels:
                             self.levels[stat] += modifier
+                            if stat == "Speed":
+                                # Reset dice roll button
+                                for _button2 in self.buttons:
+                                    if "Dice" in _button2.name:
+                                        color = RUN_COLOR
+                                        roll = _button2.text
+                                        if roll != "D":
+                                            roll = int(roll)
+                                            if roll >= self.calc_run_roll():
+                                                color = POSITIVE_BUTTON_COLOR
+                                            else:
+                                                color = NEGATIVE_BUTTON_COLOR
+                                        _button2.change_text(color=color)
+                                        break
                         else:
                             raise Exception("Button '" + _button.name
                                             + "' does not have a function "
@@ -431,7 +466,7 @@ class Player:
                     if within_rect(level_rect, last_click):
                         last_click = None
                         clear_naming_players()
-                        self.levels[stat] = 0
+                        self.levels[stat] = 0 if stat != "Level" else 1
                         self.stat_sizes[stat] = None
                         self.combat_strength = None
                         dirty = True
@@ -668,9 +703,12 @@ class Button:
                          self.font)
         return self.pos
 
-    def change_text(self, text):
-        self.text = text
+    def change_text(self, text=None, color=None):
+        if not isinstance(text, type(None)):
+            self.text = text
         self.text_size = None
+        if not isinstance(color, type(None)):
+            self.text_color = color
         self.render()
 
     def check(self, pos):
