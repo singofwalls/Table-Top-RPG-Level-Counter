@@ -1,10 +1,11 @@
-# TODO: Die Button, Notes button
+# TODO: Notes button
 # TODO: Highlight epic/winners
 # TODO: Sounds
 
-# TODO: Monster speed affects player run away roll needed
 # TODO: Hold down on +/- for speed inc/dec
 # TODO: Auto launch on screen keyboard exe if in touchscreen mode
+# TODO: Monster names should count (Monster1, Monster2, etc.)
+# TODO: Do not add numbers to name abbreviations
 
 
 import random
@@ -45,7 +46,7 @@ BACKGROUND_COLOR = (60, 63, 65)
 DEFAULT_PLAYER_COLOR = (30, 35, 42)
 POSITIVE_BUTTON_COLOR = (165, 225, 56)
 NEGATIVE_BUTTON_COLOR = (248, 38, 114)
-CLICK_COLOR = (56, 60, 66)
+CLICK_COLOR = (255, 255, 255)
 DEFAULT_BORDER_COLOR = (52, 54, 56)
 COMBAT_STRENGTH_COLOR = (214, 150, 33)
 STAT_COLOR = (255, 255, 255)
@@ -124,6 +125,11 @@ def get_text_size_to_fit(text, rect):
         else:
             break
     return _size - 1
+
+
+def start_keyboard():
+    # TODO: Launch osk
+    pass
 
 
 # Player Initialization
@@ -406,7 +412,12 @@ class Player:
                         if self in players:
                             _button.change_text("<")
                             # Players at top of combat list
-                            combat_players.insert(0, self)
+                            last_player = 0
+                            for player in combat_players:
+                                if player.monster:
+                                    break
+                                last_player += 1
+                            combat_players.insert(last_player, self)
                             players.remove(self)
                         else:
                             _button.change_text(">")
@@ -460,6 +471,7 @@ class Player:
                 last_click = None
                 clear_naming_players()
                 self.naming = True
+                start_keyboard()
                 reset_text_input()
 
         # Check if skill clicked and reset points
@@ -481,7 +493,8 @@ class Player:
             for stat in self.stat_rects:
                 stat_rect = self.stat_rects[stat]
                 if not isinstance(stat_rect, type(None)):
-                    if within_rect(stat_rect, last_click):
+                    if within_rect(stat_rect,
+                                   last_click) and not stat == "Speed":
                         last_click = None
                         clear_naming_players()
                         if stat in self.ignored_levels:
@@ -670,7 +683,7 @@ class Button:
         self.pos = None
 
     def check_click_time(self):
-        global dirty
+        global dirty, button_clicked
         if not isinstance(self.click_time, type(None)):
             if self.click_time + CLICK_TIME > time.time():
                 # Show clicked
@@ -679,6 +692,7 @@ class Button:
             else:
                 self.color = DEFAULT_PLAYER_COLOR
                 self.click_time = None
+                button_clicked = False
                 dirty = True
 
     def render(self, rect=None, player=None):
@@ -732,7 +746,7 @@ class Button:
         self.render()
 
     def check(self, pos):
-        global dirty
+        global dirty, button_clicked
         if isinstance(last_click, type(None)):
             return None
         if self.name in combat_buttons and not check_in_combat():
@@ -740,6 +754,7 @@ class Button:
         if within_rect(self.rect, pos):
             dirty = True
             self.click_time = time.time()
+            button_clicked = True
             return True
         return False
 
@@ -939,11 +954,13 @@ def render_combat_bar():
 
         status_color = POSITIVE_BUTTON_COLOR
         status_text = "WINNING! ("
+        winning = True
         if total_monster_score >= total_player_score:
+            winning = False
             status_color = NEGATIVE_BUTTON_COLOR
             status_text = "LOSING! ("
         total = total_player_score - total_monster_score
-        if warrior:
+        if not winning:
             total -= 1
         status_text += str(total)
         status_text += ")"
@@ -1129,7 +1146,8 @@ def main_loop():
 
         player_bar.check_click()
         combat_bar.check_click()
-        check_buttons()
+        if button_clicked or not isinstance(last_click, type(None)):
+            check_buttons()
         check_naming()
 
         if dirty:
@@ -1171,8 +1189,7 @@ dirty = True
 player_window_rect = None
 combat_window_rect = None
 player_names = ["Reece", "Graham", "Ryan", "Nick", "Tanner", "Josh",
-                "Nolan",
-                "Erin"]
+                "Alec", "Erin"]
 monster_names = ["Monster"]
 
 # Load game
@@ -1181,6 +1198,8 @@ file = check_path(file_path)
 last_game_file = open(file, "r")
 last_game = last_game_file.read()
 last_game_file.close()
+
+button_clicked = False
 
 players = []
 combat_players = []
