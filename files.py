@@ -19,7 +19,7 @@ def get_game_root():
         # Running from interpreter
         path_parts = path.split("/")
         path = path_parts[0] + "/" + path_parts[1] + "/" + path_parts[
-            2] + "/Desktop/Munchkin"
+            2] + "/Desktop/RPG"
     # else:
     #     # Running from compiled source
     #     path = path[:path.rfind("/")]

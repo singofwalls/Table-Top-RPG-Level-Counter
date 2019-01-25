@@ -68,7 +68,7 @@ player_height = PLAYER_WIDTH * 1.50
 player_quarter = player_height / 4
 min_window_width = PLAYER_WIDTH + MARGIN * 2
 
-WINDOW_CAPTION = "Munchkin Level Counter"
+WINDOW_CAPTION = "RPG Level Counter"
 
 PLAYER_BUTTON_NAMES = ["Level", "Gear", "1Shot", "Misc", "Speed"]
 MONSTER_BUTTON_NAMES = ["Level", "Gear", "1Shot", "Misc", "Speed"]
