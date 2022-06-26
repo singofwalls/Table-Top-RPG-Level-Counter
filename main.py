@@ -24,7 +24,7 @@ pygame.init()
 # Constants Initialization
 
 # RESOLUTION STUFF
-DEFAULT_RESOLUTION = (1400, 750)
+DEFAULT_RESOLUTION = (1920, 1080)
 old_resolution = DEFAULT_RESOLUTION
 # Get actual resolution including zoom
 ctypes.windll.user32.SetProcessDPIAware()
@@ -66,7 +66,7 @@ OPTION_BUTTON_WIDTH = BUTTON_WIDTH
 MARGIN = BUTTON_WIDTH * 1.5
 player_height = PLAYER_WIDTH * 1.50
 player_quarter = player_height / 4
-min_window_width = PLAYER_WIDTH + MARGIN * 2
+min_window_width = PLAYER_WIDTH + MARGIN * 2.5  
 
 WINDOW_CAPTION = "RPG Level Counter"
 

@@ -1,0 +1,5 @@
+.venv
+Pipfile*
+last_game*
+.mypy*
+__pycache__*
